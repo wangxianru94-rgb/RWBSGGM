@@ -1,0 +1,22 @@
+Package: RWBSGGM
+Type: Package
+Title: Efficient Oracle-based Estimation and Inference for Multiple Change Points in High-Dimensional Gaussian Graphical Models
+Version: 1.0.0
+Authors@R: c(
+    person("Xianru", "Wang", email = "wangxianru2022@163.com", role = c("aut", "cre")),
+    person("Zhi", "Yang", email = "yangzhi_sufe@outlook.com", role = "aut"),
+    person("Bin", "Liu", email = "liubin0145@gmail.com", role = "aut"),
+    person("Yufeng", "Liu", email = "yufliu@umich.edu", role = "aut")
+    )
+Description: Implementation of the RWBS procedure for multiple change-point detection, refinement, and confidence interval construction in high-dimensional Gaussian graphical models.
+Depends: R (>= 3.6.0)
+Imports:
+    glmnet,
+    parallel,
+    stats
+Suggests:
+    MASS,
+    foreach,
+    doParallel
+Encoding: UTF-8
+License: GPL-3

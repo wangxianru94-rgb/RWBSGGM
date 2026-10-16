@@ -1,0 +1,387 @@
+
+
+##################################################
+FUNCTION: hausdorff.distance 
+##################################################
+function (v1, v2, n) 
+{
+    p1 = length(v1)
+    p2 = length(v2)
+    if (p1 * p2 == 0) {
+        dis = n
+    }
+    else {
+        distance.mat = matrix(0, nrow = p1, ncol = p2)
+        for (i in 1:p1) {
+            for (j in 1:p2) {
+                distance.mat[i, j] = abs(v1[i] - v2[j])
+            }
+        }
+        dis = max(max(apply(distance.mat, 1, min)), max(apply(distance.mat, 
+            2, min)))
+    }
+    return(dis)
+}
+<bytecode: 0x1602e7230>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: band.matrix 
+##################################################
+function (dd) 
+{
+    d = dd
+    A = matrix(0, nrow = d, ncol = d)
+    for (i in 1:d) {
+        for (j in 1:i) {
+            A[i, j] = 0.8^abs(i - j)
+        }
+    }
+    A = A + t(A) - diag(rep(1, d))
+    A
+}
+<bytecode: 0x1602fc4a0>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: argmax.quantile 
+##################################################
+function (sigma1, sigma1_star, sigma2, sigma2_star, s_values = seq(-20, 
+    20, length.out = 2 * 1000 + 1), nsim = 2000) 
+{
+    argmax.sim = numeric(nsim)
+    for (i in seq_len(nsim)) {
+        Z = Z_process(sigma1, sigma1_star, sigma2, sigma2_star, 
+            s_values = s_values)
+        argmax.sim[i] = s_values[which.max(Z)]
+    }
+    quantile.argmax = quantile(argmax.sim, c(0.05, 0.95))
+    return(quantile.argmax)
+}
+<bytecode: 0x160301d70>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: rwbs_fit 
+##################################################
+function (x, M = 30, delta = ceiling(0.1 * nrow(x)), delta1 = 0.1, 
+    kmax = 10, c1 = 0.75 * sqrt(1/delta1), c2 = 0.75, vp.tau = NULL, 
+    use_fast_refinement = FALSE, do_inference = TRUE, argmax_quantile_fun = NULL) 
+{
+    n <- nrow(x)
+    p <- ncol(x)
+    if (is.null(vp.tau)) {
+        vp.tau <- 0.2 * c2 * p * log(p)/n
+    }
+    ran.intervals <- gen.intervals(n, M)
+    record <- cusum.record(ran.intervals, x, delta, c1, c2)
+    vp.estimate <- vpcusum(n, ran.intervals, delta, vp.tau, record)
+    alpha.initial <- c(1, vp.estimate, n)
+    tau.length <- length(alpha.initial)
+    cp.number <- tau.length - 2
+    tau.location.initial <- c(rep(0, kmax - length(alpha.initial)), 
+        alpha.initial)
+    if (cp.number == 0) {
+        alpha.refine <- alpha.initial
+        tau.location.refine <- c(rep(0, kmax - length(alpha.refine)), 
+            alpha.refine)
+    }
+    else {
+        if (use_fast_refinement) {
+            betahat.cache <- estimate_graphs_on_segments(alpha.initial, 
+                c1, x)
+            prefix_total <- build_refinement_cache(alpha.initial, 
+                betahat.cache, x)
+            tau.location.refine <- refinement_reuse(alpha.initial, 
+                prefix_total, kmax = kmax)
+        }
+        else {
+            tau.location.refine <- refinement(tau.length, alpha.initial, 
+                c1, x)
+        }
+        alpha.refine <- tau.location.refine[tau.location.refine != 
+            0]
+    }
+    out <- list(alpha.initial = alpha.initial, tau.location.initial = tau.location.initial, 
+        alpha.refine = alpha.refine, tau.location.refine = tau.location.refine)
+    if (do_inference) {
+        if (is.null(argmax_quantile_fun)) {
+            stop("Please provide argmax_quantile_fun when do_inference = TRUE.")
+        }
+        graph.est <- estimate_segment_graphs_cv(x, alpha.refine)
+        sigma.comp <- compute_sigma_components(x = x, alpha = alpha.refine, 
+            betahat.all = graph.est$betahat.all, deltahat.all = graph.est$deltahat.all, 
+            s.j.all = graph.est$s.j.all)
+        ci.out <- construct_confidence_intervals(alpha = alpha.refine, 
+            sigmahat.all = sigma.comp$sigmahat.all, sigmastarhat.all = sigma.comp$sigmastarhat.all, 
+            pshihat.all = sigma.comp$pshihat.all, argmax_quantile_fun = argmax_quantile_fun)
+        detect.res <- evaluate_detection_and_ci(alpha = alpha.refine, 
+            confidence = ci.out$confidence, n = n, kmax = kmax)
+        out$betahat.all <- graph.est$betahat.all
+        out$deltahat.all <- graph.est$deltahat.all
+        out$s.j.all <- graph.est$s.j.all
+        out$sigmahat.all <- sigma.comp$sigmahat.all
+        out$sigmastarhat.all <- sigma.comp$sigmastarhat.all
+        out$pshihat.all <- sigma.comp$pshihat.all
+        out$quantile <- ci.out$quantile
+        out$confidence <- ci.out$confidence
+        out$cpt.detect.res <- detect.res
+    }
+    return(out)
+}
+<bytecode: 0x160318218>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: chain.graph 
+##################################################
+function (p, alpha) 
+{
+    TT = runif(p - 1, 0.5, 1)
+    PI = c(1:p)
+    location.change = (floor(p * (1 - alpha) + 1):p)
+    PI[location.change] = sample(location.change, length(location.change), 
+        replace = F)
+    SIGMA1 = matrix(0, nrow = p, ncol = p)
+    SIGMA2 = matrix(0, nrow = p, ncol = p)
+    for (i in 1:(p - 1)) {
+        for (j in (i + 1):p) {
+            a = max(i, j)
+            b = min(i, j)
+            SIGMA1[i, j] = exp(-abs(sum(TT[(b):(a - 1)]))/5)
+        }
+    }
+    for (i in 1:(p - 1)) {
+        for (j in (i + 1):p) {
+            a = max(PI[i], PI[j])
+            b = min(PI[i], PI[j])
+            SIGMA2[i, j] = exp(-abs(sum(TT[(b):(a - 1)]))/5)
+        }
+    }
+    SIGMA1 = SIGMA1 + t(SIGMA1)
+    diag(SIGMA1) = rep(1, p)
+    OMEGA1 = solve(SIGMA1)
+    OMEGA.VECTOR1 = as.vector(OMEGA1)
+    OMEGA.VECTOR1[abs(OMEGA.VECTOR1) <= 0.001] = 0
+    PRECISION1 = matrix(OMEGA.VECTOR1, nrow = p)
+    PRECISION11 = diag(diag(PRECISION1)^{
+        -1/2
+    }) %*% PRECISION1 %*% diag(diag(PRECISION1)^{
+        -1/2
+    })
+    SIGMA2 = SIGMA2 + t(SIGMA2)
+    diag(SIGMA2) = rep(1, p)
+    OMEGA2 = solve(SIGMA2)
+    OMEGA.VECTOR2 = as.vector(OMEGA2)
+    OMEGA.VECTOR2[abs(OMEGA.VECTOR2) <= 0.001] = 0
+    PRECISION2 = matrix(OMEGA.VECTOR2, nrow = p)
+    PRECISION22 = diag(diag(PRECISION2)^{
+        -1/2
+    }) %*% PRECISION2 %*% diag(diag(PRECISION2)^{
+        -1/2
+    })
+    res = list(graph1 = PRECISION11, graph2 = PRECISION22)
+    res
+}
+<bytecode: 0x160331300>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: block.matrix 
+##################################################
+function (dd) 
+{
+    d = dd
+    k = floor(d/5)
+    NN = seq(1, d, 5)
+    A = matrix(0, nrow = d, ncol = d)
+    for (i in 1:k) {
+        for (j in NN[i]:(NN[i] + 4)) {
+            for (l in j:(NN[i] + 4)) {
+                A[j, l] = 0.6
+            }
+        }
+    }
+    A = A + t(A)
+    diag(A) = runif(d, 1, 2)
+    A
+}
+<bytecode: 0x160350b30>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: block.precision.matrix 
+##################################################
+function (dd, alpha) 
+{
+    alpha = alpha
+    d = dd
+    k = floor(d/5)
+    NN = seq(1, d, 5)
+    NN2 = c(1:d)
+    if (alpha > 0) {
+        location.change = (floor(d * (1 - alpha) + 1):d)
+        NN2[location.change] = sample(location.change, length(location.change), 
+            replace = F)
+    }
+    A = matrix(0, nrow = d, ncol = d)
+    for (i in 1:k) {
+        for (j in NN[i]:(NN[i] + 4)) {
+            for (l in j:(NN[i] + 4)) {
+                A[NN2[j], NN2[l]] = 0.8
+            }
+        }
+    }
+    A = A + t(A)
+    diag(A) = 1
+    A
+}
+<bytecode: 0x160357768>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: standardize_cp_format 
+##################################################
+function (cp_vec, n, has_boundary = FALSE) 
+{
+    cp_vec <- as.integer(cp_vec)
+    cp_vec <- cp_vec[!is.na(cp_vec)]
+    if (length(cp_vec) == 0) {
+        return(c(1, n))
+    }
+    if (has_boundary) {
+        cp_vec[cp_vec == 0] <- 1
+        cp_vec[cp_vec > n] <- n
+        cp_vec <- sort(unique(cp_vec))
+        return(cp_vec)
+    }
+    else {
+        cp_vec <- cp_vec[cp_vec > 1 & cp_vec < n]
+        cp_vec <- sort(unique(cp_vec))
+        return(c(1, cp_vec, n))
+    }
+}
+<bytecode: 0x1603677d8>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: standardize 
+##################################################
+function (X) 
+{
+    n <- nrow(X)
+    d <- ncol(X)
+    X.mean <- matrix(rep(apply(X, 2, mean), n), nrow = n, byrow = T)
+    X.sd <- apply(X, 2, sd)
+    X.stand <- (X - X.mean)/X.sd
+    X.stand
+}
+<bytecode: 0x160373870>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: chain.graph2 
+##################################################
+function (p, alpha) 
+{
+    TT = runif(p - 1, 0.5, 1)
+    PI = c(1:p)
+    location.change = (p - alpha):p
+    PI[location.change] = sample(location.change, length(location.change), 
+        replace = F)
+    SIGMA1 = matrix(0, nrow = p, ncol = p)
+    SIGMA2 = matrix(0, nrow = p, ncol = p)
+    for (i in 1:(p - 1)) {
+        for (j in (i + 1):p) {
+            a = max(i, j)
+            b = min(i, j)
+            SIGMA1[i, j] = exp(-abs(sum(TT[(b):(a - 1)]))/5)
+        }
+    }
+    for (i in 1:(p - 1)) {
+        for (j in (i + 1):p) {
+            a = max(PI[i], PI[j])
+            b = min(PI[i], PI[j])
+            SIGMA2[i, j] = exp(-abs(sum(TT[(b):(a - 1)]))/5)
+        }
+    }
+    SIGMA1 = SIGMA1 + t(SIGMA1)
+    diag(SIGMA1) = rep(1, p)
+    OMEGA1 = solve(SIGMA1)
+    OMEGA.VECTOR1 = as.vector(OMEGA1)
+    OMEGA.VECTOR1[abs(OMEGA.VECTOR1) <= 0.001] = 0
+    PRECISION1 = matrix(OMEGA.VECTOR1, nrow = p)
+    PRECISION11 = diag(diag(PRECISION1)^{
+        -1/2
+    }) %*% PRECISION1 %*% diag(diag(PRECISION1)^{
+        -1/2
+    })
+    SIGMA2 = SIGMA2 + t(SIGMA2)
+    diag(SIGMA2) = rep(1, p)
+    OMEGA2 = solve(SIGMA2)
+    OMEGA.VECTOR2 = as.vector(OMEGA2)
+    OMEGA.VECTOR2[abs(OMEGA.VECTOR2) <= 0.001] = 0
+    PRECISION2 = matrix(OMEGA.VECTOR2, nrow = p)
+    PRECISION22 = diag(diag(PRECISION2)^{
+        -1/2
+    }) %*% PRECISION2 %*% diag(diag(PRECISION2)^{
+        -1/2
+    })
+    res = list(graph1 = PRECISION11, graph2 = PRECISION22)
+    res
+}
+<bytecode: 0x160385590>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: equi.matrix 
+##################################################
+function (d) 
+{
+    a = matrix(0.4, nrow = d, ncol = d)
+    diag(a) = rep(1, d)
+    a
+}
+<bytecode: 0x160397600>
+<environment: namespace:RWBSGGM>
+
+
+##################################################
+FUNCTION: block.precision.matrix2 
+##################################################
+function (dd, alpha) 
+{
+    alpha = alpha
+    d = dd
+    k = floor(d/5)
+    NN = seq(1, d, 5)
+    NN2 = c(1:d)
+    if (alpha > 0) {
+        location.change = (d - alpha):d
+        NN2[location.change] = sample(location.change, length(location.change), 
+            replace = F)
+    }
+    A = matrix(0, nrow = d, ncol = d)
+    for (i in 1:k) {
+        for (j in NN[i]:(NN[i] + 4)) {
+            for (l in j:(NN[i] + 4)) {
+                A[NN2[j], NN2[l]] = 0.8
+            }
+        }
+    }
+    A = A + t(A)
+    diag(A) = 1
+    A
+}
+<bytecode: 0x160397f40>
+<environment: namespace:RWBSGGM>

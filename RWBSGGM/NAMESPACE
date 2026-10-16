@@ -1,0 +1,20 @@
+importFrom(glmnet, cv.glmnet, glmnet)
+importFrom(parallel, mcmapply)
+importFrom(stats, coef, cov, predict, quantile, rnorm, runif)
+
+export(
+    rwbs_fit,
+    argmax.quantile,
+    chain.graph,
+    chain.graph2,
+    block.precision.matrix,
+    block.precision.matrix2,
+    band.matrix,
+    block.matrix,
+    equi.matrix,
+    standardize,
+    standardize_cp_format,
+    hausdorff.distance
+)
+
+importFrom(stats, sd)
